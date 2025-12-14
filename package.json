@@ -1,0 +1,8 @@
+{
+  "name": "html-to-pdf-vercel",
+  "private": true,
+  "dependencies": {
+    "@sparticuz/chromium": "^143.0.0",
+    "puppeteer-core": "^21.11.0"
+  }
+}
