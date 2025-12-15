@@ -67,20 +67,22 @@
 //   }
 // }
 
-
-
 import chromium from "@sparticuz/chromium";
 import puppeteer from "puppeteer-core";
 import { PDFDocument } from "pdf-lib";
 
 export default async function handler(req, res) {
-  /* -------------------- CORS -------------------- */
+  /* -------------------- CORS (MUST BE FIRST) -------------------- */
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization"
+  );
 
+  // IMPORTANT: end preflight immediately
   if (req.method === "OPTIONS") {
-    return res.status(200).end();
+    return res.status(204).end();
   }
 
   /* -------------------- METHOD CHECK -------------------- */
@@ -97,7 +99,7 @@ export default async function handler(req, res) {
   let browser;
 
   try {
-    /* -------------------- RENDER HTML → PDF -------------------- */
+    /* -------------------- HTML → PDF -------------------- */
     browser = await puppeteer.launch({
       args: chromium.args,
       executablePath: await chromium.executablePath(),
@@ -105,10 +107,7 @@ export default async function handler(req, res) {
     });
 
     const page = await browser.newPage();
-
-    await page.setContent(html, {
-      waitUntil: "networkidle0",
-    });
+    await page.setContent(html, { waitUntil: "networkidle0" });
 
     const htmlPdfBytes = await page.pdf({
       format: "A4",
@@ -124,39 +123,29 @@ export default async function handler(req, res) {
     await browser.close();
     browser = null;
 
-    /* -------------------- LOAD BASE PDF -------------------- */
+    /* -------------------- MERGE ATTACHED PDFs -------------------- */
     const finalPdf = await PDFDocument.load(htmlPdfBytes);
 
-    /* -------------------- APPEND ATTACHED PDFs (VECTOR SAFE) -------------------- */
     for (const attachment of pdfAttachments) {
-      try {
-        const bytes = Buffer.from(attachment.data, "base64");
-        const srcDoc = await PDFDocument.load(bytes);
-
-        const pages = await finalPdf.copyPages(
-          srcDoc,
-          srcDoc.getPageIndices()
-        );
-
-        pages.forEach((p) => finalPdf.addPage(p));
-      } catch (err) {
-        console.warn(
-          `Failed to append PDF attachment: ${attachment.name}`,
-          err
-        );
-      }
+      const bytes = Buffer.from(attachment.data, "base64");
+      const srcDoc = await PDFDocument.load(bytes);
+      const pages = await finalPdf.copyPages(
+        srcDoc,
+        srcDoc.getPageIndices()
+      );
+      pages.forEach((p) => finalPdf.addPage(p));
     }
 
-    /* -------------------- RETURN MERGED PDF -------------------- */
-    const mergedPdfBytes = await finalPdf.save();
+    const mergedBytes = await finalPdf.save();
 
+    /* -------------------- RESPONSE -------------------- */
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
       'attachment; filename="proposal.pdf"'
     );
 
-    return res.status(200).send(Buffer.from(mergedPdfBytes));
+    return res.status(200).send(Buffer.from(mergedBytes));
   } catch (err) {
     console.error("PDF generation failed:", err);
     return res.status(500).send("PDF generation failed");
@@ -166,3 +155,4 @@ export default async function handler(req, res) {
     }
   }
 }
+
